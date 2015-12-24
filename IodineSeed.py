@@ -3,6 +3,7 @@
 import multiprocessing as mp
 from scipy import integrate
 import numpy as np
+import multiprocessing as mp
 
 class IodineSeed(object):
     def __init__(self, center, length, orientation, activity):
@@ -46,21 +47,21 @@ class IodineSeed(object):
 
     def _energy(self, m_r, m_theta):
         m_r = np.abs(m_r)
-        if m_r == 0:
-            return [0,0                       ]
-        m_theta = m_theta % 360
-        if m_theta > 180:
-            m_theta = 360-m_theta
+        if m_r < 0.1:
+            return [0,0]
+        # m_theta = m_theta % 360
+        # if m_theta > 180:
+            # m_theta = 360-m_theta
         m_directDisatance = m_r/np.sin(np.deg2rad(m_theta))
         m_edgeLeft = self._cosineLawGetLength(self._length/2, m_directDisatance, np.deg2rad(180. - m_theta))
         m_edgeRight = self._cosineLawGetLength(self._length/2, m_directDisatance, np.deg2rad(m_theta))
         m_degreeLeft = np.rad2deg(self._sinLawGetAngle(m_edgeLeft, np.deg2rad(180. - m_theta), m_directDisatance))
-        m_degreeRight = 180. - np.rad2deg(self._sinLawGetAngle(m_edgeRight, np.deg2rad(m_theta), m_directDisatance))
-
+        m_degreeRight = np.rad2deg(self._sinLawGetAngle(m_edgeRight, np.deg2rad(m_theta), m_directDisatance))
+        print m_degreeLeft, m_degreeRight
 
         # print m_directDisatance, m_edgeLeft, m_edgeRight, m_degreeLeft, m_degreeRight
-        m_intensityF = lambda theta: self._activity/np.sqrt(self._sinLawGetLength(m_directDisatance, np.deg2rad(m_degreeLeft), np.deg2rad(theta)))
-        m_intensity = integrate.quad(m_intensityF, m_degreeLeft, m_degreeRight)
+        m_intensityF = lambda base: self._activity/self._cosineLawGetLength(m_edgeLeft,base,np.deg2rad(m_degreeLeft))**2
+        m_intensity = integrate.quad(m_intensityF, 0, self._length)
         print m_intensity
         return m_intensity
 
@@ -79,6 +80,9 @@ class IodineSeed(object):
         m_gridLengthY = np.int(self._boundY/self._spacing[1])
         m_gridLengthZ = np.int(self._boundZ/self._spacing[2])
 
+        m_CPUnumber = mp.cpu_count()
+        pool = mp.Pool(m_CPUnumber)
+        result = []
         m_scalarField = np.zeros([m_gridLengthX, m_gridLengthY, m_gridLengthZ], dtype=np.float32)
         for i in xrange(m_gridLengthX):
             for j in xrange(m_gridLengthY):
@@ -86,11 +90,38 @@ class IodineSeed(object):
                     l_l_l_coord = np.array([-self._boundX/2. + self._spacing[0]*i, -self._boundY/2. + self._spacing[1]*j, -self._boundZ/2. + self._spacing[2]*k])
                     l_l_l_relativeVect = l_l_l_coord - self._center
                     l_l_l_relativeUnitVect = l_l_l_relativeVect/np.linalg.norm(l_l_l_relativeVect)
-                    l_l_l_theta = np.arcsin(np.dot(l_l_l_relativeUnitVect, self._orientation))
-                    l_l_l_R = np.linalg.norm(l_l_l_relativeVect)*np.cos(l_l_l_theta)
+                    l_l_l_theta = np.rad2deg(np.arccos(np.dot(l_l_l_relativeUnitVect, self._orientation)))
+                    l_l_l_R = np.abs(np.linalg.norm(l_l_l_relativeVect)*np.sin(np.deg2rad(l_l_l_theta)))
+                    # result.append(pool.apply_async(self._energy(l_l_l_R, l_l_l_theta)[0]))
                     m_scalarField[i,j,k] = self._energy(l_l_l_R, l_l_l_theta)[0]
                     print i,j,k
+        # pool.close()
+        # pool.join()
+        # print result
+        # m_scalarField[m_gridLengthX:m_gridLengthX*2-1, m_gridLengthY:m_gridLengthY*2-1, ] =  m_scalarField[0:m_gridLengthX, 0:m_gridLengthY, 0:m_gridLengthZ]
+        return m_scalarField
 
+    def Update2D(self):
+        m_gridLengthX = np.int(self._boundX/self._spacing[0])
+        m_gridLengthY = np.int(self._boundY/self._spacing[1])
+
+        m_CPUnumber = mp.cpu_count()
+        pool = mp.Pool(m_CPUnumber)
+        result = []
+        m_scalarField = np.zeros([m_gridLengthX, m_gridLengthY], dtype=np.float32)
+        for i in xrange(m_gridLengthX):
+            for j in xrange(m_gridLengthY):
+                l_l_l_coord = np.array([-self._boundX/2. + self._spacing[0]*i, -self._boundY/2. + self._spacing[1]*j])
+                l_l_l_relativeVect = self._center[0:2] - l_l_l_coord
+                l_l_l_relativeUnitVect = l_l_l_relativeVect/np.linalg.norm(l_l_l_relativeVect)
+                l_l_l_theta = np.rad2deg(np.arccos(np.dot(l_l_l_relativeUnitVect, self._orientation[0:2])))
+                l_l_l_R = np.abs(np.linalg.norm(l_l_l_relativeVect)*np.sin(np.deg2rad(l_l_l_theta)))
+                # result.append(pool.apply_async(self._energy(l_l_l_R, l_l_l_theta)[0]))
+                m_scalarField[i,j] = self._energy(l_l_l_R, l_l_l_theta)[0]
+                print i,j
+        # pool.close()
+        # pool.join()
+        # print result
         # m_scalarField[m_gridLengthX:m_gridLengthX*2-1, m_gridLengthY:m_gridLengthY*2-1, ] =  m_scalarField[0:m_gridLengthX, 0:m_gridLengthY, 0:m_gridLengthZ]
         return m_scalarField
 
