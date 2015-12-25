@@ -5,6 +5,10 @@ from scipy import integrate, interpolate
 import numpy as np
 import multiprocessing as mp
 
+# ===========================================================
+# Model 6711 I125 Amersham Health Model 6711
+# ===========================================================
+# 2D Anistropy Function
 r_thetaTable = [[0.333,0.370,0.442,0.488,0.520,0.550],
                 [0.400,0.429,0.497,0.535,0.561,0.587],
                 [0.519,0.537,0.580,0.609,0.630,0.645],
@@ -15,11 +19,42 @@ r_thetaTable = [[0.333,0.370,0.442,0.488,0.520,0.550],
                 [0.991,0.991,0.987,0.987,0.987,0.987],
                 [0.996,0.996,0.996,0.995,0.995,0.995],
                 [1.000,1.000,1.000,0.999,0.999,0.999]]
-
 theta = [0,5,10,20,30,40,50,60,70,80]
 r = [0.5,1,2,3,4,5]
 
+# Line Source Dose-rate Constant cGy/(hU)
+doseRateConstant = 0.965
+
+# Line Source Radial-Dose Function
+r_radialDose = [0.1,0.15,0.25,0.5,0.75,1,1.5,2,3,4,5,6,7,8,9,10]
+radialDoseTable = [1.055,1.078,1.082,1.071,1.042,1,0.908,0.814,0.632,0.496,0.364,0.270,0.199,0.148,0.109,0.0803]
+
 anistropy = [0.973,0.944,0.941,0.942,0.943,0.944]
+
+# BackupPlan
+doseTable = [[0,0.965,0.197,0.0682,0.0301,0.0142,0.00729,0.00395],
+            [1.524,0.754,0.183,0.0657,0.0294,0.0139,0.00720,0.00391],
+            [0.368,0.427,0.148,0.0590,0.0274,0.0132,0.00693,0.00380],
+            [0.161,0.223,0.110,0.0499,0.0244,0.0122,0.00651,0.00361],
+            [0.0879,0.121,0.0764,0.0403,0.0209,0.0109,0.00598,0.00338],
+            [0.0525,0.0700,0.0526,0.0315,0.0172,0.00950,0.00536,0.00310],
+            [0.0334,0.0430,0.0361,0.0238,0.0138,0.00805,0.00470,0.00279],
+            [0.0226,0.0279,0.0249,0.0177,0.0111,0.00671,0.00403,0.00246],
+            [0.0157,0.0187,0.0172,0.0128,0.00871,0.00556,0.00345,0.00215],
+            [0.0111,0.0127,0.0119,0.00954,0.00673,0.00451,0.00292,0.00187],
+            [0.00779,0.00878,0.00857,0.00705,0.00526,0.00360,0.00244,0.00160],
+            [0.00576,0.00631,0.00618,0.00526,0.00404,0.00292,0.00201,0.00135],
+            [0.00423,0.00456,0.00453,0.00394,0.00312,0.00233,0.00165,0.00114],
+            [0.00321,0.00339,0.00334,0.00296,0.00243,0.00185,0.00134,0.000950],
+            [0.00241,0.00252,0.00250,0.00227,0.00188,0.00147,0.00109,0.000783]]
+y = [0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0]
+z = [0.0,0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0,6.5,7.0]
+
+
+# ===========================================================
+# End
+# ===========================================================
+
 
 class IodineSeed(object):
     def __init__(self, center, length, orientation, activity):
@@ -29,11 +64,23 @@ class IodineSeed(object):
         self._orientation = np.array(orientation)
         self._activity = activity
         self._r_thetaTable = np.array(r_thetaTable)
+
+        # Construct interpolated anistropy function
         self._anistropy = np.array(anistropy)
         self._theta = np.array(theta)
         self._r = np.array(r)
         self._anistropyF = self._constructInterpolationTable()
 
+        # Construct interpolated raidialDoseFunction
+        self._radialDoseTable = np.array(radialDoseTable)
+        self._r_radialDose = np.array(r_radialDose)
+        self._radialDoseTableF = interpolate.interp1d(self._r_radialDose, self._radialDoseTable, "cubic", bounds_error=False)
+
+        # Construct interpolation for  backup
+        self._y = np.array(y)
+        self._z = np.array(z)
+        self._doseTable = np.array(doseTable)
+        self._doseTableF = self._constructInterpolationDoseMap()
 
     def _sinLawGetAngle(self, m_r1, m_theta1, m_r2):
         m_theta2 = np.arcsin(m_r2*np.sin(m_theta1)/m_r1)
@@ -89,9 +136,16 @@ class IodineSeed(object):
 
 
     def _lineSourceGL(self,m_r, m_theta):
-
-        if m_theta == 0:
-
+        m_edgeLeft = self._cosineLawGetLength(self._length/2, m_r, np.deg2rad(180. - m_theta))
+        m_edgeRight = self._cosineLawGetLength(self._length/2, m_r, np.deg2rad(m_theta))
+        m_degreeLeft = np.rad2deg(self._sinLawGetAngle(m_edgeLeft, np.deg2rad(180. - m_theta), m_r))
+        m_degreeRight = 180 - np.rad2deg(self._sinLawGetAngle(m_edgeRight, np.deg2rad(m_theta), m_r))
+        m_degreeBeta = np.abs(m_degreeLeft -m_degreeRight)
+        if m_theta != 0:
+            m_val = m_degreeBeta/(self._length*m_r*np.sin(np.deg2rad(m_theta)))
+        else:
+            m_val = (m_r**2 - self._length**2/4.)
+        return m_val
 
     def _constructInterpolationTable(self):
         m_meshgrid = np.meshgrid(self._r,self._theta)
@@ -101,6 +155,13 @@ class IodineSeed(object):
         m_f = interpolate.interp2d(m_r,m_theta,m_table, kind="quintic")
         return m_f
 
+    def _constructInterpolationDoseMap(self):
+        m_meshgrid = np.meshgrid(self._y, self._z)
+        m_y = m_meshgrid[0].flatten()
+        m_z = m_meshgrid[1].flatten()
+        m_table = self._doseTable.flatten()
+        m_f = interpolate.interp2d(m_y, m_z, m_table, kind="quintic")
+        return m_f
 
     def SetSize(self, x, y, z):
         self._boundX = x
@@ -145,16 +206,17 @@ class IodineSeed(object):
         m_CPUnumber = mp.cpu_count()
         pool = mp.Pool(m_CPUnumber)
         result = []
-        m_scalarField = np.zeros([m_gridLengthX/2, m_gridLengthY/2], dtype=np.float32)
-        for i in xrange(m_gridLengthX/2):
-            for j in xrange(m_gridLengthY/2):
+        m_scalarField = np.zeros([m_gridLengthX, m_gridLengthY], dtype=np.float32)
+        for i in xrange(m_gridLengthX):
+            for j in xrange(m_gridLengthY):
                 l_l_l_coord = np.array([self._spacing[0]*i, self._spacing[1]*j])
                 l_l_l_relativeVect = l_l_l_coord - self._center[0:2]
                 l_l_l_relativeUnitVect = l_l_l_relativeVect/np.linalg.norm(l_l_l_relativeVect)
                 l_l_l_theta = np.rad2deg(np.arccos(np.dot(l_l_l_relativeUnitVect, self._orientation[0:2])))
                 l_l_l_R = np.linalg.norm(l_l_l_relativeVect)
                 # result.append(pool.apply_async(self._energy(l_l_l_R, l_l_l_theta)[0]))
-                m_scalarField[i,j] = self._anistropyF(l_l_l_R, l_l_l_theta)
+                # m_scalarField[i,j] = self._lineSourceGL(l_l_l_R, l_l_l_theta)/self._lineSourceGL(1, 0) * self._radialDoseTableF(l_l_l_R) * self._anistropyF(l_l_l_R, l_l_l_theta)
+                m_scalarField[i,j] = self._doseTableF(l_l_l_coord[0], l_l_l_coord[1])
                 print i,j
         # pool.close()
         # pool.join()
