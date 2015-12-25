@@ -32,7 +32,7 @@ class IodineSeed(object):
         self._anistropy = np.array(anistropy)
         self._theta = np.array(theta)
         self._r = np.array(r)
-        self._mg = self._constructInterpolationTable()
+        self._anistropyF = self._constructInterpolationTable()
 
 
     def _sinLawGetAngle(self, m_r1, m_theta1, m_r2):
@@ -87,12 +87,18 @@ class IodineSeed(object):
         print m_intensity
         return m_intensity
 
+
+    def _lineSourceGL(self,m_r, m_theta):
+
+        if m_theta == 0:
+
+
     def _constructInterpolationTable(self):
         m_meshgrid = np.meshgrid(self._r,self._theta)
         m_r = m_meshgrid[0].flatten()
         m_theta = m_meshgrid[1].flatten()
         m_table = self._r_thetaTable.flatten()
-        m_f = interpolate.interp2d(m_r,m_theta,m_table, kind="linear")
+        m_f = interpolate.interp2d(m_r,m_theta,m_table, kind="quintic")
         return m_f
 
 
@@ -143,16 +149,16 @@ class IodineSeed(object):
         for i in xrange(m_gridLengthX/2):
             for j in xrange(m_gridLengthY/2):
                 l_l_l_coord = np.array([self._spacing[0]*i, self._spacing[1]*j])
-                l_l_l_relativeVect = self._center[0:2] - l_l_l_coord
+                l_l_l_relativeVect = l_l_l_coord - self._center[0:2]
                 l_l_l_relativeUnitVect = l_l_l_relativeVect/np.linalg.norm(l_l_l_relativeVect)
                 l_l_l_theta = np.rad2deg(np.arccos(np.dot(l_l_l_relativeUnitVect, self._orientation[0:2])))
-                l_l_l_R = np.abs(np.linalg.norm(l_l_l_relativeVect)*np.sin(np.deg2rad(l_l_l_theta)))
+                l_l_l_R = np.linalg.norm(l_l_l_relativeVect)
                 # result.append(pool.apply_async(self._energy(l_l_l_R, l_l_l_theta)[0]))
-                m_scalarField[i,j] = self._mg(l_l_l_R, l_l_l_theta)
+                m_scalarField[i,j] = self._anistropyF(l_l_l_R, l_l_l_theta)
                 print i,j
         # pool.close()
         # pool.join()
         # print result
         # m_scalarField[m_gridLengthX:m_gridLengthX*2-1, m_gridLengthY:m_gridLengthY*2-1, ] =  m_scalarField[0:m_gridLengthX, 0:m_gridLengthY, 0:m_gridLengthZ]
-        return m_scalarField
+        return np.flipud(m_scalarField)
 
