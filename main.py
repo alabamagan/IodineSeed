@@ -5,10 +5,10 @@ import numpy as np
 import IodineSeed
 
 def main():
-    seedexp = IodineSeed.IodineSeed([0,0,0], 4., [0,1,0], 1)
+    seedexp = IodineSeed.IodineSeed([0,0,0], 4., [0,-1,0], 1)
     # seedexp._energy(5, 100)
     # seedexp._energy(5, 80)
-    seedexp.SetSize(1,1,20)
+    seedexp.SetSize(2,1,20)
     seedexp.SetSpacing(0.01,0.01,0.1)
     out = seedexp.Update2D()
     np.save("out", out)
